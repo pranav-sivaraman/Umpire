@@ -76,12 +76,6 @@ blt_add_target_compile_flags(
   TO pool_stress_test
   FLAGS ${UMPIRE_DISABLE_DEPRECATED_WARNINGS_FLAG})
 
-blt_add_executable(
-  NAME malloc_vs_pool_benchmarks
-  SOURCES malloc_vs_pool_benchmarks.cpp
-  DEPENDS_ON ${stress_test_depends}
-)
-
 if (UMPIRE_ENABLE_BENCHMARKS)
   set (benchmark_depends gbenchmark umpire)
 
@@ -142,4 +136,15 @@ if (UMPIRE_ENABLE_BENCHMARKS)
   blt_add_benchmark(
     NAME inspector_benchmarks
     COMMAND inspector_benchmarks)
+
+  blt_add_executable(
+    NAME malloc_vs_pool_benchmarks
+    SOURCES malloc_vs_pool_benchmarks.cpp
+    DEPENDS_ON ${benchmark_depends}
+  )
+
+  blt_add_benchmark(
+    NAME malloc_vs_pool_benchmarks
+   COMMAND malloc_vs_pool_benchmarks)
+
 endif()
