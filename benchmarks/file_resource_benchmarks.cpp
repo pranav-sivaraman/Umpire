@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <random>
 #include <vector>
 
 #include "umpire/Allocator.hpp"
