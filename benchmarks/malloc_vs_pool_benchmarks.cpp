@@ -71,6 +71,10 @@ void umpire_driver(benchmark::State &state)
     pool_allocate(rm, pool_allocator, allocations, allocation_size, memset);
   }
 
+  for (auto &ptr : allocations) {
+    rm.deallocate(ptr);
+  }
+
   pool_allocator.release();
 }
 
