@@ -111,17 +111,17 @@ void umpire_driver(benchmark::State &state)
 
 BENCHMARK(malloc_driver)
     ->ArgsProduct({
-        {GibiByte},    // Pool Sizes
-        {KibiByte},    // Allocation Sizes
-        {true, false}, // Memset
+        {GibiByte, 2 * GibiByte}, // Pool Sizes
+        {KibiByte},               // Allocation Sizes
+        {true, false},            // Memset
     })
     ->UseManualTime();
 
 BENCHMARK(umpire_driver<umpire::strategy::QuickPool, true>)
     ->ArgsProduct({
-        {GibiByte},    // Pool Sizes
-        {KibiByte},    // Allocation Sizes
-        {true, false}, // Memset
+        {GibiByte, 2 * GibiByte}, // Pool Sizes
+        {KibiByte},               // Allocation Sizes
+        {true, false},            // Memset
     })
     ->UseManualTime();
 
