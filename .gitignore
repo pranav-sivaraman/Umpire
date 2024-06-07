@@ -9,3 +9,6 @@ CMakeFiles
 .spack_env/*/.spack-env
 *.json
 *cache*
+*.cmake
+*.sh
+*.out
