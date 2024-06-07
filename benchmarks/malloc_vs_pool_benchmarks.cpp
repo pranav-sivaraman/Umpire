@@ -14,12 +14,14 @@ constexpr std::size_t MibiByte = std::size_t{1} << 20;
 constexpr std::size_t GibiByte = std::size_t{1} << 30;
 constexpr std::size_t TebiByte = std::size_t{1} << 40;
 
+static int counter = 0;
+
 inline void malloc_allocate(std::vector<void *> &allocations, std::size_t allocation_size, bool memset)
 {
   for (auto &ptr : allocations) {
     ptr = std::malloc(allocation_size);
     if (memset) {
-      std::memset(ptr, 0, allocation_size);
+      std::memset(ptr, 1, allocation_size);
     }
   }
 #if defined(UMPIRE_ENABLE_MPI)
@@ -33,7 +35,7 @@ inline void pool_allocate(umpire::ResourceManager &rm, umpire::Allocator &pool_a
   for (auto &ptr : allocations) {
     ptr = pool_allocator.allocate(allocation_size);
     if (memset) {
-      rm.memset(ptr, 0, allocation_size);
+      rm.memset(ptr, 1, allocation_size);
     }
   }
 #if defined(UMPIRE_ENABLE_MPI)
@@ -71,7 +73,6 @@ void malloc_driver(benchmark::State &state)
 template <class T, bool introspection>
 void umpire_driver(benchmark::State &state)
 {
-  static int counter = 0;
   std::size_t pool_size = state.range(0);
   std::size_t allocation_size = state.range(1);
   bool memset = state.range(2);
@@ -109,21 +110,31 @@ void umpire_driver(benchmark::State &state)
   pool_allocator.release();
 }
 
+std::vector<int64_t> allocation_sizes = {4096, 8192};
+
 BENCHMARK(malloc_driver)
     ->ArgsProduct({
-        {GibiByte, 2 * GibiByte}, // Pool Sizes
-        {KibiByte},               // Allocation Sizes
-        {true, false},            // Memset
+        {GibiByte},       // Pool Sizes
+        allocation_sizes, // Allocation Sizes
+        {true, false},    // Memset
     })
     ->UseManualTime();
 
 BENCHMARK(umpire_driver<umpire::strategy::QuickPool, true>)
     ->ArgsProduct({
-        {GibiByte, 2 * GibiByte}, // Pool Sizes
-        {KibiByte},               // Allocation Sizes
-        {true, false},            // Memset
+        {GibiByte},       // Pool Sizes
+        allocation_sizes, // Allocation Sizes
+        {true, false},    // Memset
     })
     ->UseManualTime();
+
+// BENCHMARK(umpire_driver<umpire::strategy::QuickPool, false>)
+//     ->ArgsProduct({
+//         {GibiByte},    // Pool Sizes
+//         {KibiByte},    // Allocation Sizes
+//         {true, false}, // Memset
+//     })
+//     ->UseManualTime();
 
 class NullReporter : public ::benchmark::BenchmarkReporter {
  public:
