@@ -29,13 +29,13 @@ void malloc_allocate(std::vector<void *> &allocations, std::size_t allocation_si
 #endif
 }
 
-void pool_allocate(umpire::ResourceManager &rm, umpire::Allocator &pool_allocator, std::vector<void *> &allocations,
-                   std::size_t allocation_size, bool memset)
+void pool_allocate(umpire::Allocator &pool_allocator, std::vector<void *> &allocations, std::size_t allocation_size,
+                   bool memset)
 {
   for (auto &ptr : allocations) {
     ptr = pool_allocator.allocate(allocation_size);
     if (memset) {
-      rm.memset(ptr, 1, allocation_size);
+      std::memset(ptr, 1, allocation_size);
     }
   }
 #if defined(UMPIRE_ENABLE_MPI)
@@ -63,10 +63,12 @@ void malloc_driver(benchmark::State &state)
     const auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
     auto elapsed_seconds = duration.count();
     state.SetIterationTime(elapsed_seconds);
-  }
 
-  for (auto &ptr : allocations) {
-    std::free(ptr);
+    for (auto &ptr : allocations) {
+      std::free(ptr);
+    }
+
+    allocations.clear();
   }
 }
 
@@ -95,44 +97,47 @@ void umpire_driver(benchmark::State &state)
     MPI_Barrier(MPI_COMM_WORLD);
 #endif
     auto start{std::chrono::high_resolution_clock::now()};
-    pool_allocate(rm, pool_allocator, allocations, allocation_size, memset);
+    pool_allocate(pool_allocator, allocations, allocation_size, memset);
     auto end{std::chrono::high_resolution_clock::now()};
 
     const auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
     auto elapsed_seconds = duration.count();
     state.SetIterationTime(elapsed_seconds);
-  }
+    for (auto &ptr : allocations) {
+      pool_allocator.deallocate(ptr);
+    }
 
-  for (auto &ptr : allocations) {
-    pool_allocator.deallocate(ptr);
+    allocations.clear();
   }
 
   pool_allocator.release();
 }
 
-std::vector<int64_t> allocation_sizes = {4096, 8192};
+std::vector<int64_t> pool_sizes = {GibiByte / 2, GibiByte};
+std::vector<int64_t> allocation_sizes = {1024, 2048, 4096, 8192};
+std::vector<int64_t> memset_flags = {true, false};
 
 BENCHMARK(malloc_driver)
     ->ArgsProduct({
-        {GibiByte},       // Pool Sizes
-        allocation_sizes, // Allocation Sizes
-        {true, false},    // Memset
+        pool_sizes,
+        allocation_sizes,
+        memset_flags,
     })
     ->UseManualTime();
 
 BENCHMARK(umpire_driver<umpire::strategy::QuickPool, true>)
     ->ArgsProduct({
-        {GibiByte},       // Pool Sizes
-        allocation_sizes, // Allocation Sizes
-        {true, false},    // Memset
+        pool_sizes,
+        allocation_sizes,
+        memset_flags,
     })
     ->UseManualTime();
 
 BENCHMARK(umpire_driver<umpire::strategy::QuickPool, false>)
     ->ArgsProduct({
-        {GibiByte},       // Pool Sizes
-        allocation_sizes, // Allocation Sizes
-        {false},          // Memset
+        pool_sizes,
+        allocation_sizes,
+        memset_flags,
     })
     ->UseManualTime();
 
