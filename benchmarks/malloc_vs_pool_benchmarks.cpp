@@ -1,7 +1,9 @@
-#include <benchmark/benchmark.h>
+#include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <mpi.h>
 
+#include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <umpire/Allocator.hpp>
@@ -14,8 +16,6 @@ constexpr std::size_t MibiByte = std::size_t{1} << 20;
 constexpr std::size_t GibiByte = std::size_t{1} << 30;
 constexpr std::size_t TebiByte = std::size_t{1} << 40;
 
-static int counter = 0;
-
 void malloc_allocate(std::vector<void *> &allocations, std::size_t allocation_size, bool memset)
 {
   for (auto &ptr : allocations) {
@@ -24,9 +24,6 @@ void malloc_allocate(std::vector<void *> &allocations, std::size_t allocation_si
       std::memset(ptr, 1, allocation_size);
     }
   }
-#if defined(UMPIRE_ENABLE_MPI)
-  MPI_Barrier(MPI_COMM_WORLD);
-#endif
 }
 
 void pool_allocate(umpire::Allocator &pool_allocator, std::vector<void *> &allocations, std::size_t allocation_size,
@@ -38,153 +35,95 @@ void pool_allocate(umpire::Allocator &pool_allocator, std::vector<void *> &alloc
       std::memset(ptr, 1, allocation_size);
     }
   }
-#if defined(UMPIRE_ENABLE_MPI)
-  MPI_Barrier(MPI_COMM_WORLD);
-#endif
 }
 
-void malloc_driver(benchmark::State &state)
+int main(int argc, char *argv[])
 {
-  std::size_t pool_size = state.range(0);
-  std::size_t allocation_size = state.range(1);
-  bool memset = state.range(2);
+  MPI_Init(&argc, &argv);
+  int rank = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+  int64_t N = 10000;
+  bool memset = false;
+
+  if (argc > 1) {
+    N = std::stoll(argv[1]);
+  }
+
+  if (argc > 2) {
+    memset = std::stoi(argv[2]);
+  }
+
+  std::size_t pool_size = GibiByte;
+  std::size_t allocation_size = KibiByte / 2;
   std::size_t num_allocations = pool_size / allocation_size;
+
   std::vector<void *> allocations(num_allocations);
 
-  for (auto _ : state) {
-#if defined(UMPIRE_ENABLE_MPI)
+  if (rank == 0) {
+    fmt::println("N: {}, Memset: {}", N, memset);
+    fmt::println("Pool Size: {}, Allocation Size: {}", pool_size, allocation_size);
+  }
+
+  auto &rm = umpire::ResourceManager::getInstance();
+  auto allocator = rm.getAllocator("HOST");
+  auto pool_allocator = rm.makeAllocator<umpire::strategy::QuickPool, true>("QuickPool", allocator, pool_size);
+
+  // Malloc
+  std::chrono::duration<double> malloc_average{};
+  for (int64_t i = 0; i < N; i++) {
     MPI_Barrier(MPI_COMM_WORLD);
-#endif
-    auto start{std::chrono::high_resolution_clock::now()};
+    auto start = std::chrono::high_resolution_clock::now();
+
     malloc_allocate(allocations, allocation_size, memset);
-    auto end{std::chrono::high_resolution_clock::now()};
 
-    const auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-    auto elapsed_seconds = duration.count();
-    state.SetIterationTime(elapsed_seconds);
+    MPI_Barrier(MPI_COMM_WORLD);
+    auto end = std::chrono::high_resolution_clock::now();
 
+    const std::chrono::duration<double> elapsed = end - start;
+    malloc_average += elapsed;
+
+    // Cleanup
     for (auto &ptr : allocations) {
       std::free(ptr);
     }
-
     allocations.clear();
   }
-}
 
-template <class T, bool introspection>
-void umpire_driver(benchmark::State &state)
-{
-  std::size_t pool_size = state.range(0);
-  std::size_t allocation_size = state.range(1);
-  bool memset = state.range(2);
+  malloc_average /= N;
+  if (rank == 0)
+    fmt::println("Malloc Elapsed Time: {}", malloc_average);
 
-  int rank = 0;
-#if defined(UMPIRE_ENABLE_MPI)
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-#endif
-
-  std::size_t num_allocations = pool_size / allocation_size;
-  std::vector<void *> allocations(num_allocations);
-
-  std::string pool_name = fmt::format("{}-{}", counter++, rank);
-  auto &rm = umpire::ResourceManager::getInstance();
-  auto allocator = rm.getAllocator("HOST");
-  auto pool_allocator = rm.makeAllocator<T, introspection>(pool_name, allocator, pool_size);
-
-  for (auto _ : state) {
-#if defined(UMPIRE_ENABLE_MPI)
+  // Umpire QuickPool
+  std::chrono::duration<double> umpire_average{};
+  for (int64_t i = 0; i < N; i++) {
     MPI_Barrier(MPI_COMM_WORLD);
-#endif
-    auto start{std::chrono::high_resolution_clock::now()};
-    pool_allocate(pool_allocator, allocations, allocation_size, memset);
-    auto end{std::chrono::high_resolution_clock::now()};
+    auto start = std::chrono::high_resolution_clock::now();
 
-    const auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-    auto elapsed_seconds = duration.count();
-    state.SetIterationTime(elapsed_seconds);
+    pool_allocate(pool_allocator, allocations, allocation_size, memset);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    auto end = std::chrono::high_resolution_clock::now();
+
+    const std::chrono::duration<double> elapsed = end - start;
+    umpire_average += elapsed;
+
+    // Cleanup
     for (auto &ptr : allocations) {
       pool_allocator.deallocate(ptr);
     }
-
     allocations.clear();
   }
 
-  pool_allocator.release();
-}
-
-std::vector<int64_t> pool_sizes = {GibiByte / 2, GibiByte};
-std::vector<int64_t> allocation_sizes = {1024, 2048, 4096, 8192};
-std::vector<int64_t> memset_flags = {true, false};
-
-BENCHMARK(malloc_driver)
-    ->ArgsProduct({
-        pool_sizes,
-        allocation_sizes,
-        memset_flags,
-    })
-    ->UseManualTime();
-
-BENCHMARK(umpire_driver<umpire::strategy::QuickPool, true>)
-    ->ArgsProduct({
-        pool_sizes,
-        allocation_sizes,
-        memset_flags,
-    })
-    ->UseManualTime();
-
-BENCHMARK(umpire_driver<umpire::strategy::QuickPool, false>)
-    ->ArgsProduct({
-        pool_sizes,
-        allocation_sizes,
-        memset_flags,
-    })
-    ->UseManualTime();
-
-class NullReporter : public ::benchmark::BenchmarkReporter {
- public:
-  NullReporter()
-  {
-  }
-  virtual bool ReportContext(const Context &)
-  {
-    return true;
-  }
-  virtual void ReportRuns(const std::vector<Run> &)
-  {
-  }
-  virtual void Finalize()
-  {
-  }
-};
-
-// The main is rewritten to allow for MPI initializing and for selecting a
-// reporter according to the process rank
-int main(int argc, char **argv)
-{
-#if defined(UMPIRE_ENABLE_MPI)
-  MPI_Init(&argc, &argv);
-#endif
-
-  int rank = 0;
-#if defined(UMPIRE_ENABLE_MPI)
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-#endif
-
-  ::benchmark::Initialize(&argc, argv);
-
+  umpire_average /= N;
   if (rank == 0)
-    // root process will use a reporter from the usual set provided by
-    // ::benchmark
-    ::benchmark::RunSpecifiedBenchmarks();
-  else {
-    // reporting from other processes is disabled by passing a custom reporter
-    NullReporter null;
-    ::benchmark::RunSpecifiedBenchmarks(&null);
-  }
+    fmt::println("Umpire Elapsed Time: {}", umpire_average);
 
-#if defined(UMPIRE_ENABLE_MPI)
+  pool_allocator.release();
+
+  fmt::println("{}", umpire_average > malloc_average);
+
   MPI_Finalize();
-#endif
+
   return 0;
 }
