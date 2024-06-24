@@ -87,7 +87,6 @@ int main(int argc, char *argv[])
     for (auto &ptr : allocations) {
       std::free(ptr);
     }
-    allocations.clear();
   }
 
   malloc_average /= N;
@@ -112,7 +111,6 @@ int main(int argc, char *argv[])
     for (auto &ptr : allocations) {
       pool_allocator.deallocate(ptr);
     }
-    allocations.clear();
   }
 
   umpire_average /= N;
